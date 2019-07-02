@@ -65,6 +65,7 @@ def load_img(img_path: str) -> np.array:
     img = Image.open(img_path)
     longest_dim = max(img.size)
     scale = max_size / longest_dim
+    print(img.size)
     scaled_width, scaled_height = round(img.size[0] * scale), round(img.size[1] * scale)
     scaled_img = img.resize((scaled_width, scaled_height), Image.ANTIALIAS)
 
@@ -139,7 +140,7 @@ def create_model_from_vgg() -> models.Model:
         "block5_conv1",
     ]
     # Obtain the model and make all layers untrainable.
-    vgg = vgg19.VGG19(include_top=False, weights="imagenet")
+    vgg = tf.keras.applications.vgg19.VGG19(include_top=False, weights="imagenet")
     vgg.trainable = False
 
     # Obtain style and content output layers and then merge them
@@ -147,7 +148,7 @@ def create_model_from_vgg() -> models.Model:
     content_layer_outputs = [vgg.get_layer(name).output for name in content_layers]
     all_model_outputs = style_layer_outputs + content_layer_outputs
 
-    return models.Model(vgg.input, all_model_outputs)
+    return tf.keras.models.Model(vgg.input, all_model_outputs)
 
 
 def load_and_preprocess_img(img_path: str) -> np.array:
@@ -212,7 +213,7 @@ def create_gram_matrix(tensor: np.array):
     style_img = np.reshape(tensor, [-1, channels])
     wtf = np.shape(style_img)[0]
     print(wtf)
-    gram_matrix = np.matmul(style_img, style_img, transpose_a=True)
+    gram_matrix = tf.matmul(style_img, style_img, transpose_a=True)
 
     return gram_matrix / tf.cast(wtf, tf.float32)
 
@@ -244,7 +245,7 @@ def get_feature_representations(model, content_img_path, style_img_path):
     style_outputs = model(style_img)
 
     # Obtain the features for every style layer that is within our model. (5 total)
-    content_features = [content_layer[0] for content_layer in content_outputs[:5]]
+    content_features = [content_layer[0] for content_layer in content_outputs[5:]]
     style_features = [style_layer[0] for style_layer in style_outputs[:5]]
 
     return style_features, content_features
@@ -278,6 +279,8 @@ def compute_total_loss(
 
     # Obtain the total content loss from all layers
     for target_content, comb_content in zip(content_features, content_output_features):
+        print(comb_content[0].shape)
+        print(target_content.shape)
         content_score += weight_per_content_layer * get_content_loss(
             comb_content[0], target_content
         )
@@ -329,7 +332,7 @@ def compute_style_transfer(
     init_image = load_and_preprocess_img(content_img_path)
     init_image = tf.Variable(init_image, dtype=tf.float32)
 
-    optimizer = tf.train.AdamOptimizer(learning_rate=5, betal=0.99, epsilon=1e-1)
+    optimizer = tf.train.AdamOptimizer(learning_rate=5, beta1=0.99, epsilon=1e-1)
 
     iter_count = 1
 
@@ -399,6 +402,33 @@ def compute_style_transfer(
     return best_img, best_loss
 
 
+def show_results(best_img, content_path, style_path, show_large_final=True):
+    plt.figure(figsize=(10, 5))
+    content = load_img(content_path)
+    style = load_img(style_path)
+
+    plt.subplot(1, 2, 1)
+    plt_img(content, "Content Image")
+
+    plt.subplot(1, 2, 2)
+    plt_img(style, "Style Image")
+
+    if show_large_final:
+        plt.figure(figsize=(10, 10))
+
+        plt.imshow(best_img)
+        plt.title("Output Image")
+        plt.show()
+
+
 if __name__ == "__main__":
+    get_test_imgs()
     enable_eager()
-    display_test_images()
+    content_path = "/tmp/nst/Green_Sea_Turtle_grazing_seagrass.jpg"
+    style_path = "/tmp/nst/The_Great_Wave_off_Kanagawa.jpg"
+
+    best, best_loss = compute_style_transfer(
+        content_path, style_path, num_iterations=1000
+    )
+    Image.fromarray(best)
+    show_results(best, content_path, style_path)

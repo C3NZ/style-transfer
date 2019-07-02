@@ -55,6 +55,9 @@ def enable_eager():
 def load_img(img_path: str) -> np.array:
     """
         Load the image and apply scaling to it.
+
+        Returns:
+            An np array of our scaled image.
     """
     # Scale the image to be 512
     max_size = 512
@@ -75,6 +78,10 @@ def load_img(img_path: str) -> np.array:
 def plt_img(img_data: np.array, title: str = None) -> None:
     """
         Plot the image within matplotlib
+
+        Params:
+            img_data - The image 4d (batch, w, h, c) in array representation.
+            title (None) - The title of the image to be plotted.
     """
     # Normalize the image to be plotted by matplotlib
     unbatched_img = np.squeeze(img_data, axis=0)
@@ -179,6 +186,7 @@ def deprocess_img(processed_img: np.array) -> np.array:
     # Reverse the channels
     processed_img = processed_img[:, :, ::-1]
 
+    # Clip all values to be within uint8 range (0 - 255) for pixel data
     processed_img = processed_img.clip(processed_img, 0, 255).astype("uint8")
     return processed_img
 
@@ -195,6 +203,9 @@ def create_gram_matrix(tensor: np.array):
     """
         Create a gram matrix by obtaining the dot product of the feature map
         of the original image.
+
+        Returns:
+            The gram matrix of the content img
     """
     channels = int(tensor.shape[-1])
     style_img = np.reshape(tensor, [-1, channels])
@@ -209,12 +220,28 @@ def get_style_loss(og_style: np.array, target_style: np.array):
     """
         Obtain the style loss by taking the euclidean distance between the gram matricies of
         the target style and input style.
+
+        Returns:
+            The mean euclidean distance between all points.
     """
     og_gram_matrix = create_gram_matrix(og_style)
     return tf.reduce_mean(tf.square(og_gram_matrix - target_style))
 
 
-def get_feature_representations(model)
+def get_feature_representations(model, content_img_path, style_img_path):
+    """
+        Obtain the feature representations of our images through one forward
+        propagation of each model.
+    """
+    # Load in our content and sytle images prepared to be inputs within
+    # our model.
+    content_img = load_and_preprocess_img(content_img_path)
+    style_img = load_and_preprocess_img(style_img_path)
+
+    # Computes one batch of content style and features
+    content_outputs = model(content_img)
+    style_outputs = model(style_img)
+
 
 if __name__ == "__main__":
     enable_eager()

@@ -119,7 +119,10 @@ def create_model_from_vgg() -> models.Model:
         A keras functional model output
     """
     # Define the layers that we specifically want.
+    # Content layer where we obtain our feature maps
     content_layers = ["block5_conv2"]
+
+    # The styling layers we want
     style_layers = [
         "block1_conv1",
         "block2_conv1",
@@ -143,14 +146,75 @@ def load_and_preprocess_img(img_path: str) -> np.array:
     """
         Load and preprocess an image with vggs image preprocessor that applies 
         normalization to each channel with a specified mean.
-        
+
         Returns:
-            
+            An np array containing the image that we're looking to deprocess
     """
     img = load_img(img_path)
     processed_img = vgg19.preprocess_input(img)
     return processed_img
 
+
+def deprocess_img(processed_img: np.array) -> np.array:
+    """
+        Takes in a vgg19 preprocessed image and reverses the preprocessing by adding 
+        approximate values applied to the channels and then reversing the channels.
+    """
+    # Create a copy of the processed image
+    processed_img = processed_img.copy()
+
+    # If the image is shaped to fit within a batch, squeeze out the fourth dimension.
+    if len(processed_img.shape) == 4:
+        processed_img = processed_img.squeeze(processed_img, axis=0)
+
+    # Ensure that our image only contains the X, Y, and channel data.
+    assert len(processed_img.shape) == 3
+
+    # Apply the inverse of the vgg19 preprocessing that's applied to return all channels  back to their
+    # nearest original values (approximation)
+    processed_img[:, :, 0] += 103.939
+    processed_img[:, :, 1] += 116.779
+    processed_img[:, :, 2] += 123.68
+
+    # Reverse the channels
+    processed_img = processed_img[:, :, ::-1]
+
+    processed_img = processed_img.clip(processed_img, 0, 255).astype("uint8")
+    return processed_img
+
+
+def get_content_loss(og_content: np.array, target_content: np.array):
+    """
+        Obtain the euclidean distance between our original content and our target
+        content and then take the mean distance of all points.
+    """
+    return tf.reduce_mean(tf.square(og_content - target_content))
+
+
+def create_gram_matrix(tensor: np.array):
+    """
+        Create a gram matrix by obtaining the dot product of the feature map
+        of the original image.
+    """
+    channels = int(tensor.shape[-1])
+    style_img = np.reshape(tensor, [-1, channels])
+    wtf = np.shape(style_img)[0]
+    print(wtf)
+    gram_matrix = np.matmul(style_img, style_img, transpose_a=True)
+
+    return gram_matrix / tf.cast(wtf, tf.float32)
+
+
+def get_style_loss(og_style: np.array, target_style: np.array):
+    """
+        Obtain the style loss by taking the euclidean distance between the gram matricies of
+        the target style and input style.
+    """
+    og_gram_matrix = create_gram_matrix(og_style)
+    return tf.reduce_mean(tf.square(og_gram_matrix - target_style))
+
+
+def get_feature_representations(model)
 
 if __name__ == "__main__":
     enable_eager()

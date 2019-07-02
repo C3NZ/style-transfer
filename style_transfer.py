@@ -7,6 +7,7 @@ import os
 import subprocess
 import time
 
+import IPython.display
 # DS library imports
 import matplotlib as matplot
 import matplotlib.pyplot as plt
@@ -49,7 +50,7 @@ def enable_eager():
         Enable and then check if eager is running.
     """
     tf.enable_eager_execution()
-    print(f"Eager execution: {tf.executing_eagerly()}")
+    print(f"Eager execution is running: {tf.executing_eagerly()}")
 
 
 def load_img(img_path: str) -> np.array:
@@ -238,13 +239,166 @@ def get_feature_representations(model, content_img_path, style_img_path):
     content_img = load_and_preprocess_img(content_img_path)
     style_img = load_and_preprocess_img(style_img_path)
 
-    # Computes one batch of content style and features
+    # Computes one batch of content & style and features
     content_outputs = model(content_img)
     style_outputs = model(style_img)
+
+    # Obtain the features for every style layer that is within our model. (5 total)
+    content_features = [content_layer[0] for content_layer in content_outputs[:5]]
+    style_features = [style_layer[0] for style_layer in style_outputs[:5]]
+
+    return style_features, content_features
+
+
+def compute_total_loss(
+    model, loss_weights, init_image, gram_style_features, content_features
+) -> tuple:
+    style_weight, content_weight = loss_weights
+
+    # This gives us the content and style features at the desired layers.
+    model_outputs = model(init_image)
+
+    style_output_features = model_outputs[:5]
+    content_output_features = model_outputs[5:]
+
+    style_score = 0
+    content_score = 0
+
+    # 5 total style layers
+    weight_per_style_layer = 1.0 / 5.0
+
+    # Compute the total style loss for all layers
+    for target_style, comb_style in zip(gram_style_features, style_output_features):
+        # Obtain the total score
+        style_score += weight_per_style_layer * get_style_loss(
+            comb_style[0], target_style
+        )
+
+    weight_per_content_layer = 1
+
+    # Obtain the total content loss from all layers
+    for target_content, comb_content in zip(content_features, content_output_features):
+        content_score += weight_per_content_layer * get_content_loss(
+            comb_content[0], target_content
+        )
+
+    # Multiply the scores by their corresponding loss weights
+    style_score *= style_weight
+    content_score *= content_weight
+
+    total_loss = style_score + content_score
+
+    return total_loss, style_score, content_score
+
+
+def compute_gradients(config) -> None:
+    """
+        Compute the gradients within our losses
+    """
+    with tf.GradientTape() as tape:
+        all_losses = compute_total_loss(**config)
+
+        total_loss = all_losses[0]
+
+        return tape.gradient(total_loss, config["init_image"]), all_losses
+
+
+def compute_style_transfer(
+    content_img_path,
+    style_img_path,
+    num_iterations=500,
+    content_weight=1e3,
+    style_weight=1e-2,
+):
+    # Obtain our stripped down vgg model.
+    model = create_model_from_vgg()
+
+    # Make all layers not trainable
+    for layer in model.layers:
+        layer.trainable = False
+
+    # Obtain the style and content features from our intermediate layers
+    style_features, content_features = get_feature_representations(
+        model, content_img_path, style_img_path
+    )
+
+    gram_style_features = [
+        create_gram_matrix(style_feature) for style_feature in style_features
+    ]
+
+    init_image = load_and_preprocess_img(content_img_path)
+    init_image = tf.Variable(init_image, dtype=tf.float32)
+
+    optimizer = tf.train.AdamOptimizer(learning_rate=5, betal=0.99, epsilon=1e-1)
+
+    iter_count = 1
+
+    best_loss, best_img = float("inf"), None
+
+    loss_weights = (style_weight, content_weight)
+
+    config = {
+        "model": model,
+        "loss_weights": loss_weights,
+        "init_image": init_image,
+        "gram_style_features": gram_style_features,
+        "content_features": content_features,
+    }
+    # For displaying
+    num_rows = 2
+    num_cols = 5
+    display_interval = num_iterations / (num_rows * num_cols)
+    start_time = time.time()
+    global_start = time.time()
+
+    norm_means = np.array([103.939, 116.779, 123.68])
+    min_vals = -norm_means
+    max_vals = 255 - norm_means
+
+    imgs = []
+    for i in range(num_iterations):
+        grads, all_loss = compute_gradients(config)
+        loss, style_score, content_score = all_loss
+        optimizer.apply_gradients([(grads, init_image)])
+        clipped = tf.clip_by_value(init_image, min_vals, max_vals)
+        init_image.assign(clipped)
+        end_time = time.time()
+
+        if loss < best_loss:
+            # Update best loss and best image from total loss.
+            best_loss = loss
+            best_img = deprocess_img(init_image.numpy())
+
+        if i % display_interval == 0:
+            start_time = time.time()
+
+            # Use the .numpy() method to get the concrete numpy array
+            plot_img = init_image.numpy()
+            plot_img = deprocess_img(plot_img)
+            imgs.append(plot_img)
+            IPython.display.clear_output(wait=True)
+            IPython.display.display_png(Image.fromarray(plot_img))
+            print("Iteration: {}".format(i))
+            print(
+                "Total loss: {:.4e}, "
+                "style loss: {:.4e}, "
+                "content loss: {:.4e}, "
+                "time: {:.4f}s".format(
+                    loss, style_score, content_score, time.time() - start_time
+                )
+            )
+    print("Total time: {:.4f}s".format(time.time() - global_start))
+    IPython.display.clear_output(wait=True)
+    plt.figure(figsize=(14, 4))
+    for i, img in enumerate(imgs):
+        plt.subplot(num_rows, num_cols, i + 1)
+        plt.imshow(img)
+        plt.xticks([])
+        plt.yticks([])
+
+    return best_img, best_loss
 
 
 if __name__ == "__main__":
     enable_eager()
     display_test_images()
-
-    load_and_preprocess_img("/tmp/nst/Green_Sea_Turtle_grazing_seagrass.jpg")

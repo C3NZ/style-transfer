@@ -61,8 +61,9 @@ def load_img(img_path: str) -> np.array:
             An np array of our scaled image.
     """
     # Scale the image to be 512
-    max_size = 512
+    max_size = 256
     img = Image.open(img_path)
+
     longest_dim = max(img.size)
     scale = max_size / longest_dim
     print(img.size)
@@ -174,7 +175,7 @@ def deprocess_img(processed_img: np.array) -> np.array:
 
     # If the image is shaped to fit within a batch, squeeze out the fourth dimension.
     if len(processed_img.shape) == 4:
-        processed_img = processed_img.squeeze(processed_img, axis=0)
+        processed_img = np.squeeze(processed_img, axis=0)
 
     # Ensure that our image only contains the X, Y, and channel data.
     assert len(processed_img.shape) == 3
@@ -189,7 +190,7 @@ def deprocess_img(processed_img: np.array) -> np.array:
     processed_img = processed_img[:, :, ::-1]
 
     # Clip all values to be within uint8 range (0 - 255) for pixel data
-    processed_img = processed_img.clip(processed_img, 0, 255).astype("uint8")
+    processed_img = np.clip(processed_img, 0, 255).astype("uint8")
     return processed_img
 
 
@@ -279,8 +280,6 @@ def compute_total_loss(
 
     # Obtain the total content loss from all layers
     for target_content, comb_content in zip(content_features, content_output_features):
-        print(comb_content[0].shape)
-        print(target_content.shape)
         content_score += weight_per_content_layer * get_content_loss(
             comb_content[0], target_content
         )
@@ -309,7 +308,7 @@ def compute_gradients(config) -> None:
 def compute_style_transfer(
     content_img_path,
     style_img_path,
-    num_iterations=500,
+    num_iterations=1000,
     content_weight=1e3,
     style_weight=1e-2,
 ):
@@ -332,7 +331,7 @@ def compute_style_transfer(
     init_image = load_and_preprocess_img(content_img_path)
     init_image = tf.Variable(init_image, dtype=tf.float32)
 
-    optimizer = tf.train.AdamOptimizer(learning_rate=5, beta1=0.99, epsilon=1e-1)
+    optimizer = tf.train.AdamOptimizer(learning_rate=10, beta1=0.99, epsilon=1e-1)
 
     iter_count = 1
 
@@ -360,44 +359,17 @@ def compute_style_transfer(
 
     imgs = []
     for i in range(num_iterations):
+        print(f"Iteration: {i}")
         grads, all_loss = compute_gradients(config)
         loss, style_score, content_score = all_loss
         optimizer.apply_gradients([(grads, init_image)])
         clipped = tf.clip_by_value(init_image, min_vals, max_vals)
         init_image.assign(clipped)
-        end_time = time.time()
 
         if loss < best_loss:
             # Update best loss and best image from total loss.
             best_loss = loss
             best_img = deprocess_img(init_image.numpy())
-
-        if i % display_interval == 0:
-            start_time = time.time()
-
-            # Use the .numpy() method to get the concrete numpy array
-            plot_img = init_image.numpy()
-            plot_img = deprocess_img(plot_img)
-            imgs.append(plot_img)
-            IPython.display.clear_output(wait=True)
-            IPython.display.display_png(Image.fromarray(plot_img))
-            print("Iteration: {}".format(i))
-            print(
-                "Total loss: {:.4e}, "
-                "style loss: {:.4e}, "
-                "content loss: {:.4e}, "
-                "time: {:.4f}s".format(
-                    loss, style_score, content_score, time.time() - start_time
-                )
-            )
-    print("Total time: {:.4f}s".format(time.time() - global_start))
-    IPython.display.clear_output(wait=True)
-    plt.figure(figsize=(14, 4))
-    for i, img in enumerate(imgs):
-        plt.subplot(num_rows, num_cols, i + 1)
-        plt.imshow(img)
-        plt.xticks([])
-        plt.yticks([])
 
     return best_img, best_loss
 
@@ -422,11 +394,9 @@ def show_results(best_img, content_path, style_path, show_large_final=True):
 
 
 if __name__ == "__main__":
-    get_test_imgs()
     enable_eager()
-    content_path = "/tmp/nst/Green_Sea_Turtle_grazing_seagrass.jpg"
-    style_path = "/tmp/nst/The_Great_Wave_off_Kanagawa.jpg"
-
+    content_path = "./imgs/content/mels.jpg"
+    style_path = "./imgs/styles/deepfry.jpg"
     best, best_loss = compute_style_transfer(
         content_path, style_path, num_iterations=1000
     )
